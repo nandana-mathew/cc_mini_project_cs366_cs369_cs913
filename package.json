@@ -1,0 +1,10 @@
+{
+  "name": "mini-raft-drawing-board",
+  "version": "1.0.0",
+  "description": "Distributed Drawing Board with Mini-RAFT Consensus",
+  "scripts": {
+    "start": "docker-compose up --build",
+    "deploy:copilot": "copilot init --app drawing-app --type 'Load Balanced Web Service' --deploy",
+    "deploy:eb": "eb init -p docker --region us-east-1 drawing-app && eb create drawing-app-env && eb deploy"
+  }
+}

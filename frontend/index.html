@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distributed Drawing Board</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    #status-bar {
+      height: 36px; background: #16213e; display: flex; align-items: center;
+      padding: 0 16px; gap: 24px; font-family: monospace; font-size: 13px;
+      color: #a8b2d8; border-bottom: 1px solid #0f3460; flex-shrink: 0;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot-connected { background: #4ade80; }
+    .dot-disconnected { background: #f87171; animation: blink 1s infinite; }
+    .dot-reconnecting { background: #fbbf24; animation: blink 0.5s infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    #canvas { flex: 1; cursor: crosshair; touch-action: none; }
+    #brush-controls {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      background: rgba(22,33,62,0.9); border: 1px solid #0f3460; border-radius: 12px;
+      padding: 8px 16px; display: flex; gap: 12px; align-items: center;
+    }
+    .color-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+    .color-btn.active { border-color: white; transform: scale(1.2); }
+    input[type=range] { accent-color: #7c83fd; }
+  </style>
+</head>
+<body>
+  <div id="status-bar">
+    <span><span class="status-dot dot-disconnected" id="conn-dot"></span><span id="conn-status">Connecting...</span></span>
+    <span>Leader: <strong id="leader-display">unknown</strong></span>
+    <span>Term: <strong id="term-display">—</strong></span>
+    <span>Log: <strong id="log-display">0</strong> strokes</span>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="brush-controls">
+    <span style="color:#a8b2d8;font-size:13px;font-family:monospace">Size:</span>
+    <input type="range" id="brush-size" min="2" max="20" value="4" style="width:80px">
+    <div class="color-btn active" style="background:#7c83fd" data-color="#7c83fd"></div>
+    <div class="color-btn" style="background:#f472b6" data-color="#f472b6"></div>
+    <div class="color-btn" style="background:#4ade80" data-color="#4ade80"></div>
+    <div class="color-btn" style="background:#fbbf24" data-color="#fbbf24"></div>
+    <div class="color-btn" style="background:#f87171" data-color="#f87171"></div>
+    <div class="color-btn" style="background:#e2e8f0" data-color="#e2e8f0"></div>
+  </div>
+  <script src="canvas.js"></script>
+</body>
+</html>
