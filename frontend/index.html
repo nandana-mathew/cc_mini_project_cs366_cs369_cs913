@@ -25,6 +25,7 @@
     }
     .color-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
     .color-btn.active { border-color: white; transform: scale(1.2); }
+    .eraser-btn { display: flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-family: sans-serif; font-size: 11px; }
     input[type=range] { accent-color: #7c83fd; }
   </style>
 </head>
@@ -34,6 +35,7 @@
     <span>Leader: <strong id="leader-display">unknown</strong></span>
     <span>Term: <strong id="term-display">—</strong></span>
     <span>Log: <strong id="log-display">0</strong> strokes</span>
+    <button id="kill-leader-btn" style="margin-left:auto; background:#f87171; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; transition: 0.2s;">Simulate Leader Failure</button>
   </div>
   <canvas id="canvas"></canvas>
   <div id="brush-controls">
@@ -45,6 +47,7 @@
     <div class="color-btn" style="background:#fbbf24" data-color="#fbbf24"></div>
     <div class="color-btn" style="background:#f87171" data-color="#f87171"></div>
     <div class="color-btn" style="background:#e2e8f0" data-color="#e2e8f0"></div>
+    <div class="color-btn eraser-btn" style="background:#444" data-color="eraser" title="Eraser">E</div>
   </div>
   <script src="canvas.js"></script>
 </body>

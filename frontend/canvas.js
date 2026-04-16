@@ -13,13 +13,19 @@ let isDrawing = false;
 let currentStroke = [];
 let currentColor = '#7c83fd';
 let brushSize = 4;
+let isEraser = false;
 const strokes = []; 
 
 document.querySelectorAll('.color-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    currentColor = btn.dataset.color;
+    if (btn.dataset.color === 'eraser') {
+      isEraser = true;
+    } else {
+      isEraser = false;
+      currentColor = btn.dataset.color;
+    }
   });
 });
 document.getElementById('brush-size').addEventListener('input', e => {
@@ -37,7 +43,8 @@ function getPos(e) {
 function renderStroke(stroke) {
   if (!stroke.points || stroke.points.length < 2) return;
   ctx.beginPath();
-  ctx.strokeStyle = stroke.color;
+  ctx.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = stroke.isEraser ? 'rgba(0,0,0,1)' : stroke.color;
   ctx.lineWidth = stroke.width;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -63,7 +70,8 @@ canvas.addEventListener('mousemove', e => {
   currentStroke.push(pos);
   if (currentStroke.length >= 2) {
     ctx.beginPath();
-    ctx.strokeStyle = currentColor;
+    ctx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = isEraser ? 'rgba(0,0,0,1)' : currentColor;
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -88,7 +96,8 @@ function sendStroke() {
     id: crypto.randomUUID(),
     points: currentStroke,
     color: currentColor,
-    width: brushSize
+    width: brushSize,
+    isEraser: isEraser
   };
   currentStroke = [];
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -156,5 +165,15 @@ async function pollLeaderInfo() {
   } catch (_) {}
 }
 setInterval(pollLeaderInfo, 2000);
+
+document.getElementById('kill-leader-btn').addEventListener('click', async () => {
+  try {
+    const btn = document.getElementById('kill-leader-btn');
+    btn.textContent = 'Killing Leader...';
+    btn.style.opacity = '0.5';
+    await fetch(`http://${window.location.host}/kill-leader`, { method: 'POST' });
+    setTimeout(() => { btn.textContent = 'Simulate Leader Failure'; btn.style.opacity = '1'; }, 2000);
+  } catch(e) {}
+});
 
 connect();

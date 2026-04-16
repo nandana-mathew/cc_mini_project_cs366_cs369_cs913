@@ -1,0 +1,19 @@
+{
+  "cluster": "raft-cluster",
+  "serviceName": "replica2",
+  "taskDefinition": "raft-replica2",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-066481e22ef3800f7"],
+      "securityGroups": ["sg-0a368e71ae05cca72"],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "serviceRegistries": [
+    {
+      "registryArn": "arn:aws:servicediscovery:us-east-1:459594646095:service/srv-6yc5n6uhxwmtxbem"
+    }
+  ]
+}

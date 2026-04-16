@@ -1,0 +1,21 @@
+{
+  "family": "raft-replica1",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::459594646095:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "replica1",
+      "image": "459594646095.dkr.ecr.us-east-1.amazonaws.com/raft-replica1:latest",
+      "portMappings": [{"containerPort": 3001}],
+      "environment": [
+        {"name": "REPLICA_ID", "value": "replica1"},
+        {"name": "REPLICA_PORT", "value": "3001"},
+        {"name": "PEER_URLS", "value": "http://replica2.raft.local:3002,http://replica3.raft.local:3003"},
+        {"name": "GATEWAY_NOTIFY_URL", "value": "http://gateway.raft.local:8080/leader-update"}
+      ]
+    }
+  ]
+}

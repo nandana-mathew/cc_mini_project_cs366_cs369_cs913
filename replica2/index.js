@@ -140,6 +140,11 @@ app.get('/sync-log', (req, res) => {
   res.json({ entries, commitIndex: state.commitIndex });
 });
 
+app.post('/crash', (req, res) => {
+  log('CRASH endpoint called. Simulating failure...');
+  process.exit(1);
+});
+
 app.get('/status', (req, res) => {
   res.json({
     id: state.id, role: state.role, term: state.term,

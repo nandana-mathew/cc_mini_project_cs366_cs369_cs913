@@ -1,62 +1,135 @@
 # Distributed Real-Time Drawing Board
 
-## Project Overview
-This project is a highly resilient, distributed collaborative drawing board. Instead of relying on a centralized database or standard message broker, it leverages a custom-built **Mini-RAFT consensus protocol** to ensure all drawing strokes are ordered, synchronized, and fault-tolerant across multiple server replicas.
+A collaborative drawing board built on a custom **Mini-RAFT consensus protocol** — no Redis, no Socket.io rooms, no external message brokers. Just raw distributed systems engineering in Node.js.
 
 ---
 
-## What Has Been Done So Far
+## What It Does
 
-1. **Custom RAFT Consensus Implementation (Node.js)**
-   - Developed a 3-node replica cluster from scratch that handles Leader Election, Heartbeats, and Log Replication (`AppendEntries`).
-   - Built automatic failover logic. If the leader goes offline, the remaining followers immediately elect a new leader.
-   - Synchronizes stragglers/reconnected nodes (followers sync missed entries from the current leader).
-
-2. **WebSocket Gateway Routing Layer**
-   - Created a stateless Gateway server that dynamically discovers the current RAFT leader.
-   - Handles real-time dual-way communication (via WebSockets) between the browser clients and the backend cluster.
-   - Automatically buffers and routes new drawing strokes to the active leader.
-
-3. **Browser-Based Canvas Frontend**
-   - Implemented an HTML5 Canvas drawing surface.
-   - Robust WebSocket reconnection logic that re-fetches committed strokes to redraw the canvas seamlessly if the connection is dropped or a failover occurs.
-
-4. **Containerized Infrastructure**
-   - Fully dockerized architecture using Docker Compose.
-   - Features internal DNS/networking (`raft-net`) and isolated environments for replicas and the gateway.
-   - Implemented health checks (via `curl` directly inside the Alpine images) ensuring dependent services wait until replicas are fully operational.
+Multiple users can draw on a shared canvas in real-time. Every stroke is treated as a log entry in a RAFT consensus cluster, guaranteeing that all connected users always see the same drawing — even if a server crashes mid-session.
 
 ---
 
-## How Unique Is This Project?
+## Architecture
 
-Most real-time drawing applications simply use a WebSocket server broadcasting state (like Socket.io rooms) or lean on an existing Pub/Sub cache like Redis. 
+```
+Browser (Canvas) <--WebSocket--> Gateway <--HTTP--> Replica1 (RAFT Node)
+                                                 \-> Replica2 (RAFT Node)
+                                                 \-> Replica3 (RAFT Node)
+```
 
-**This project stands out because:**
-1. **Low-Level Distributed Systems Focus:** Writing a custom RAFT consensus algorithm in JavaScript instead of relying on external orchestration tools is a profound demonstration of distributed systems engineering.
-2. **Event Sourcing with Consensus:** A drawing board is the perfect visual representation of the RAFT log. Each "stroke" is a state transition. Because of the Strict Consistency provided by RAFT, it is impossible for two connected users to permanently see different version of the drawing, mitigating race conditions entirely.
-3. **True Fault Tolerance Demonstration:** You can physically kill active containers (`docker stop ...`) while users are drawing, and the system dynamically absorbs the failure and continues drawing correctly without data loss—a rare feature in student or mini-projects.
+- **3 RAFT Replicas** — elect a leader, replicate strokes as log entries, handle failover automatically
+- **Gateway** — stateless WebSocket server that discovers the current leader and routes strokes to it
+- **Frontend** — HTML5 Canvas with WebSocket reconnection and full replay on reconnect
 
 ---
 
-## What Else Can Be Done (Future Enhancements)
+## How to Run (Local)
 
-While perfectly functional and adhering to the core problem statement, here are ways to expand and improve the system:
+Make sure Docker is running, then:
 
-1. **Persistent Storage (Disk Logging)**
-   - *Current State:* The RAFT log is held strictly in RAM (`let state = { log: [] }`). If the entire cluster is shut down, the drawing is lost.
-   - *Enhancement:* Write the stroke logs to the disk (e.g., appending to a simple `.json` file line-by-line or using minimal SQLite) so drawings survive full cluster restarts.
+```bash
+docker-compose up --build
+```
 
-2. **Log Compaction / Snapshotting**
-   - *Current State:* The drawing log grows infinitely as long as the server is running.
-   - *Enhancement:* Implement RAFT snapshotting. Once the log reaches a certain size, compress the current canvas state into a single image or snapshot matrix, and discard the old stroke history to save memory and speed up syncing for new clients.
+Open `http://localhost:8080` in your browser.
 
-3. **Drawing Features & Undo/Redo**
-   - *Enhancement:* Allow users to pick colors or brush sizes. 
-   - *Enhancement:* Since we are using an Event Sourced RAFT log, implementing a "Global Undo" feature simply means deleting the last log entry and broadcasting a truncate command!
+To test fault tolerance — kill a replica while drawing:
+```bash
+docker stop mini_project-replica1-1
+```
 
-4. **Dynamic Cluster Membership**
-   - *Enhancement:* Modify the protocol to support adding a 4th or 5th replica dynamically without having to edit the `docker-compose.yml` and restart the network.
+The remaining two nodes elect a new leader and drawing continues without data loss.
 
-5. **Load Testing & Benchmarking**
-   - *Enhancement:* Create a script that generates thousands of random strokes locally to prove the performance and limits of the Node.js RAFT implementation under heavy load.
+---
+
+## AWS Deployment (ECS + Fargate)
+
+We deployed this on AWS using ECS Fargate with ECR for container images and Cloud Map for internal DNS between services.
+
+### Steps We Followed
+
+**1. Push images to ECR**
+```bash
+aws ecr create-repository --repository-name raft-gateway --region us-east-1
+aws ecr create-repository --repository-name raft-replica1 --region us-east-1
+aws ecr create-repository --repository-name raft-replica2 --region us-east-1
+aws ecr create-repository --repository-name raft-replica3 --region us-east-1
+
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+
+docker build -t raft-gateway -f gateway/Dockerfile .
+docker tag raft-gateway:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/raft-gateway:latest
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/raft-gateway:latest
+
+# repeat for replica1, replica2, replica3
+```
+
+**2. Create ECS cluster**
+```bash
+aws ecs create-cluster --cluster-name raft-cluster --region us-east-1
+```
+
+**3. Create IAM execution role**
+```bash
+aws iam create-role --role-name ecsTaskExecutionRole --assume-role-policy-document file://ecs/trust-policy.json
+aws iam attach-role-policy --role-name ecsTaskExecutionRole --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+```
+
+**4. Create Cloud Map namespace for internal DNS**
+```bash
+aws servicediscovery create-private-dns-namespace --name raft.local --vpc <vpc-id> --region us-east-1
+
+# Create a service entry for each replica and gateway
+aws servicediscovery create-service --name replica1 --dns-config "NamespaceId=<ns-id>,DnsRecords=[{Type=A,TTL=10}]" --region us-east-1
+# repeat for replica2, replica3, gateway
+```
+
+**5. Register task definitions**
+```bash
+aws ecs register-task-definition --cli-input-json file://ecs/replica1-task.json --region us-east-1
+aws ecs register-task-definition --cli-input-json file://ecs/replica2-task.json --region us-east-1
+aws ecs register-task-definition --cli-input-json file://ecs/replica3-task.json --region us-east-1
+aws ecs register-task-definition --cli-input-json file://ecs/gateway-task.json --region us-east-1
+```
+
+**6. Create ECS services**
+```bash
+aws ecs create-service --cli-input-json file://ecs/replica1-service.json --region us-east-1
+aws ecs create-service --cli-input-json file://ecs/replica2-service.json --region us-east-1
+aws ecs create-service --cli-input-json file://ecs/replica3-service.json --region us-east-1
+aws ecs create-service --cli-input-json file://ecs/gateway-service.json --region us-east-1
+```
+
+**7. Get the public IP of the gateway task**
+```bash
+aws ecs list-tasks --cluster raft-cluster --service-name gateway --region us-east-1
+aws ecs describe-tasks --cluster raft-cluster --tasks <task-arn> --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text --region us-east-1
+aws ec2 describe-network-interfaces --network-interface-ids <eni-id> --query "NetworkInterfaces[0].Association.PublicIp" --output text --region us-east-1
+```
+
+App is accessible at `http://<public-ip>:8080`
+
+---
+
+## Key Design Decisions
+
+- **RAFT over Redis/Kafka** — consensus is implemented from scratch, not delegated to an external tool
+- **Event sourcing** — each stroke is a state transition in the log; the canvas is fully reproducible by replaying the log
+- **Stateless gateway** — the gateway holds no authoritative state, making it trivially replaceable
+- **Internal DNS via Cloud Map** — replicas discover each other by name (`replica1.raft.local`) not hardcoded IPs
+
+---
+
+## Project Structure
+
+```
+├── frontend/         # HTML5 canvas + WebSocket client
+├── gateway/          # Express + WebSocket gateway server
+├── replica1/         # RAFT node 1
+├── replica2/         # RAFT node 2
+├── replica3/         # RAFT node 3
+├── ecs/              # AWS ECS task and service definitions
+├── docker-compose.yml
+└── README.md
+```

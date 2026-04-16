@@ -101,6 +101,18 @@ app.post('/leader-update', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/kill-leader', async (req, res) => {
+  if (!state.leaderUrl) return res.status(404).json({ error: 'No leader known' });
+  try {
+    fetch(`${state.leaderUrl}/crash`, { method: 'POST' }).catch(() => {});
+    const oldLeader = state.leaderUrl;
+    state.leaderUrl = null;
+    res.json({ success: true, message: `Crash command sent to ${oldLeader}` });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to send crash command' });
+  }
+});
+
 app.get('/log', (req, res) => {
   res.json({ strokes: state.committedLog });
 });

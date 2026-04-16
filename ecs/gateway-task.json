@@ -1,0 +1,18 @@
+{
+  "family": "raft-gateway",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::459594646095:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "gateway",
+      "image": "459594646095.dkr.ecr.us-east-1.amazonaws.com/raft-gateway:latest",
+      "portMappings": [{"containerPort": 8080}],
+      "environment": [
+        {"name": "REPLICA_URLS", "value": "http://replica1.raft.local:3001,http://replica2.raft.local:3002,http://replica3.raft.local:3003"}
+      ]
+    }
+  ]
+}
