@@ -11,12 +11,13 @@
    - Frontend (canvas.js, index.html)
    - Gateway (gateway/index.js)
    - Replicas (replica1/index.js, replica2/index.js, replica3/index.js)
-3. [RAFT Concepts Deep Dive](#raft-concepts-deep-dive)
-4. [Cloud Computing Concepts](#cloud-computing-concepts)
-5. [Logic Flow Diagrams](#logic-flow-diagrams)
-6. [Common Failure Scenarios](#common-failure-scenarios)
-7. [VIVA Q&A](#viva-qa)
-8. [Performance Analysis](#performance-analysis)
+3. [Docker Commands Reference](#docker-commands-reference)
+4. [RAFT Concepts Deep Dive](#raft-concepts-deep-dive)
+5. [Cloud Computing Concepts](#cloud-computing-concepts)
+6. [Logic Flow Diagrams](#logic-flow-diagrams)
+7. [Common Failure Scenarios](#common-failure-scenarios)
+8. [VIVA Q&A](#viva-qa)
+9. [Performance Analysis](#performance-analysis)
 
 ---
 
@@ -915,6 +916,378 @@ Replication fails (log mismatch at index 1)
 → Follower checks: log[0] = A:T1 ✓
 → Appends [B:T2, C:T3, D:T3]
 → Updates commitIndex to 3
+```
+
+---
+
+# Docker Commands Reference
+
+## Essential Docker Commands for MiniRAFT Project
+
+### 1. Docker Compose Commands (Main Way to Run Project)
+
+```bash
+# Start all containers (gateway + 3 replicas)
+docker-compose up
+
+# Start in background (detached mode)
+docker-compose up -d
+
+# Restart all containers
+docker-compose restart
+
+# Stop all containers (keeps volumes/data)
+docker-compose stop
+
+# Remove all containers
+docker-compose down
+
+# Remove containers + volumes (clean slate)
+docker-compose down -v
+
+# View logs of all services
+docker-compose logs
+
+# Follow logs in real-time
+docker-compose logs -f
+
+# View logs of specific service
+docker-compose logs gateway
+docker-compose logs replica1
+
+# Follow logs of specific service
+docker-compose logs -f replica2
+
+# Remove logs
+docker-compose logs --tail=0
+```
+
+**Most Common Workflow:**
+```bash
+# Start project fresh
+docker-compose up -d
+
+# Watch logs
+docker-compose logs -f
+
+# When done, stop everything
+docker-compose down
+```
+
+---
+
+### 2. Container Management Commands
+
+```bash
+# List running containers
+docker ps
+
+# List all containers (including stopped)
+docker ps -a
+
+# Check container status and health
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Restart specific container
+docker restart cc_mini_project-replica1-1
+docker restart cc_mini_project-gateway-1
+
+# Stop specific container
+docker stop cc_mini_project-replica2-1
+
+# Start stopped container
+docker start cc_mini_project-replica3-1
+
+# Remove container
+docker rm cc_mini_project-replica1-1
+
+# Remove all stopped containers
+docker container prune
+```
+
+---
+
+### 3. View Container Logs
+
+```bash
+# View last 50 lines of logs
+docker logs cc_mini_project-replica1-1
+
+# View last 20 lines with real-time follow
+docker logs -f cc_mini_project-replica1-1
+
+# View last 100 lines
+docker logs --tail=100 cc_mini_project-replica1-1
+
+# View logs with timestamps
+docker logs --timestamps cc_mi_project-gateway-1
+
+# View logs from last 10 minutes
+docker logs --since 10m cc_mini_project-replica2-1
+
+# Combine: last 50 lines with timestamps, follow mode
+docker logs -f --tail=50 --timestamps cc_mini_project-replica3-1
+```
+
+**Real-time Debugging:**
+```bash
+# Monitor all replica logs simultaneously
+docker logs -f cc_mini_project-replica1-1 &
+docker logs -f cc_mini_project-replica2-1 &
+docker logs -f cc_mini_project-replica3-1 &
+wait
+```
+
+---
+
+### 4. Container Inspection
+
+```bash
+# Get full container details (JSON format)
+docker inspect cc_mini_project-gateway-1
+
+# Get IP address of container
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' cc_mini_project-replica1-1
+
+# Get port mappings
+docker inspect -f '{{.HostConfig.PortBindings}}' cc_mini_project-gateway-1
+
+# Check if container is running
+docker inspect -f '{{.State.Running}}' cc_mini_project-replica1-1
+
+# Get container's environment variables
+docker inspect cc_mini_project-replica1-1 | grep -A 20 '"Env"'
+```
+
+---
+
+### 5. Execute Commands Inside Container
+
+```bash
+# Run command in running container
+docker exec cc_mini_project-replica1-1 ps aux
+
+# Interactive shell inside container
+docker exec -it cc_mini_project-gateway-1 /bin/bash
+
+# Check Node version inside container
+docker exec cc_mini_project-replica2-1 node --version
+
+# Check running processes
+docker exec cc_mini_project-replica3-1 ps aux | grep node
+
+# List files in container
+docker exec cc_mini_project-gateway-1 ls -la /app
+```
+
+---
+
+### 6. Network Commands
+
+```bash
+# List Docker networks
+docker network ls
+
+# Inspect bridge network
+docker network inspect cc_mini_project_default
+
+# Check container's IP in network
+docker network inspect cc_mini_project_default | grep -A 10 "Containers"
+
+# Ping container from another
+docker exec cc_mini_project-gateway-1 ping replica1
+
+# Curl from one container to another
+docker exec cc_mini_project-gateway-1 curl http://replica1:3001/status
+```
+
+---
+
+### 7. Image Management
+
+```bash
+# List all images
+docker images
+
+# Build image from Dockerfile
+docker build -t cc_mini_project-replica:latest ./replica1
+
+# Tag an image
+docker tag cc_mini_project-replica:latest cc_mini_project-replica:v1.0
+
+# Remove image
+docker rmi cc_mini_project-gateway:latest
+
+# Remove all unused images
+docker image prune
+
+# Remove all images
+docker rmi $(docker images -q)
+```
+
+---
+
+### 8. Volume Management (Data Persistence)
+
+```bash
+# List all volumes
+docker volume ls
+
+# Inspect specific volume
+docker volume inspect cc_mini_project_replica1_data
+
+# Remove specific volume
+docker volume rm cc_mini_project_replica1_data
+
+# Remove all unused volumes
+docker volume prune
+
+# Remove volume with container
+docker rm -v cc_mini_project-replica1-1
+```
+
+---
+
+### 9. Resource Monitoring
+
+```bash
+# View container resource usage (CPU, memory)
+docker stats
+
+# Monitor specific container
+docker stats cc_mini_project-replica1-1
+
+# View container memory limit
+docker inspect cc_mini_project-gateway-1 | grep -i memory
+
+# Get container's process info
+docker top cc_mini_project-replica2-1
+```
+
+---
+
+### 10. System-wide Commands
+
+```bash
+# Remove all stopped containers, unused networks, dangling volumes/images
+docker system prune
+
+# Same as above but also removes unused images
+docker system prune -a
+
+# Show Docker system information
+docker info
+
+# Show docker version
+docker version
+
+# Check for issues
+docker doctor  # (if available)
+```
+
+---
+
+## Troubleshooting Commands
+
+```bash
+# Container keeps crashing? Check logs
+docker logs cc_mini_project-replica1-1
+
+# Port already in use?
+lsof -i :8080
+lsof -i :3001
+
+# Container won't start? Check it exists
+docker ps -a | grep replica1
+
+# Clear everything and start fresh
+docker-compose down -v
+docker-compose up -d
+
+# Restart just one replica
+docker restart cc_mini_project-replica3-1
+
+# Check health of containers
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Get container exit code (if stopped)
+docker inspect cc_mini_project-replica1-1 | grep ExitCode
+```
+
+---
+
+## Common Docker Scenarios for MiniRAFT
+
+### Scenario 1: One replica unhealthy, need to restart
+```bash
+docker restart cc_mini_project-replica1-1
+docker logs -f cc_mini_project-replica1-1
+```
+
+### Scenario 2: Gateway connection issues, debug network
+```bash
+docker exec cc_mini_project-gateway-1 curl http://replica1:3001/status
+docker network inspect cc_mini_project_default
+```
+
+### Scenario 3: Complete system recovery
+```bash
+docker-compose down
+docker-compose down -v  # Remove volumes too
+docker-compose up -d
+docker logs -f
+```
+
+### Scenario 4: Monitor all 3 replicas real-time
+```bash
+docker logs -f cc_mini_project-replica1-1 &
+docker logs -f cc_mini_project-replica2-1 &
+docker logs -f cc_mini_project-replica3-1 &
+wait
+```
+
+### Scenario 5: Check resource usage during heavy load
+```bash
+docker stats cc_mini_project-replica1-1 cc_mini_project-replica2-1 cc_mini_project-replica3-1
+```
+
+---
+
+## Docker-Compose File Structure
+
+**Key sections in docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  gateway:
+    image: cc_mini_project-gateway  # Image name
+    ports:
+      - "8080:8080"                 # Port mapping
+    environment:
+      - REPLICA_URLS=...            # Environment variables
+    depends_on:
+      - replica1                     # Start order
+    
+  replica1:
+    image: cc_mini_project-replica1
+    ports:
+      - "3001:3001"
+    environment:
+      - REPLICA_ID=replica1
+    healthcheck:                     # Health status
+      test: ["CMD", "curl", ...]
+      interval: 10s
+    
+volumes:                             # Data persistence
+  replica1_data:
+  replica2_data:
+  replica3_data:
+
+networks:                            # Container networking
+  default:
+    driver: bridge
 ```
 
 ---

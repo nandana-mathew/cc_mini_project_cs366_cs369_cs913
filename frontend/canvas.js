@@ -149,6 +149,7 @@ function sendStroke() {
 let ws = null;
 let reconnectDelay = 1000;
 const maxDelay = 10000;
+let connectionState = 'disconnected';  // Track connection state globally
 const systemEvents = [];
 const MAX_EVENTS = 100;
 
@@ -177,9 +178,11 @@ function connect() {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    connectionState = 'connected';
     updateStatus('connected');
     reconnectDelay = 1000;
     addEventLog('🔗 Connected to Gateway', 'success');
+    document.getElementById('status-conn').textContent = '✅ Connected';
     console.log('[WS] Connected to gateway');
   };
 
@@ -217,7 +220,9 @@ function connect() {
   };
 
   ws.onclose = () => {
+    connectionState = 'disconnected';
     updateStatus('disconnected');
+    document.getElementById('status-conn').textContent = '❌ Disconnected';
     addEventLog('⚠️ Disconnected from Gateway', 'failure', `Retrying in ${reconnectDelay}ms`);
     console.log(`[WS] Disconnected. Reconnecting in ${reconnectDelay}ms`);
     setTimeout(connect, reconnectDelay);
@@ -227,12 +232,12 @@ function connect() {
   ws.onerror = () => ws.close();
 }
 
-function updateStatus(state) {
+function updateStatus(statusState) {
   const dot = document.getElementById('conn-dot');
   const label = document.getElementById('conn-status');
   dot.className = 'status-dot';
-  if (state === 'connected') { dot.classList.add('dot-connected'); label.textContent = 'Connected'; }
-  else if (state === 'reconnecting') { dot.classList.add('dot-reconnecting'); label.textContent = 'Reconnecting...'; }
+  if (statusState === 'connected') { dot.classList.add('dot-connected'); label.textContent = 'Connected'; }
+  else if (statusState === 'reconnecting') { dot.classList.add('dot-reconnecting'); label.textContent = 'Reconnecting...'; }
   else { dot.classList.add('dot-disconnected'); label.textContent = 'Disconnected'; }
 }
 
@@ -242,20 +247,11 @@ async function pollLeaderInfo() {
     const data = await res.json();
     document.getElementById('leader-display').textContent = data.leaderId || 'electing...';
     document.getElementById('term-display').textContent = data.term || '—';
-  } catch (_) {}
-  document.getElementById('status-conn').textContent = state === 'connected' ? '✅ Connected' : 
-    state === 'reconnecting' ? '🔄 Reconnecting...' : '❌ Disconnected';
-}
-
-async function pollLeaderInfo() {
-  try {
-    const res = await fetch(`http://${window.location.host}/leader-status`);
-    const data = await res.json();
-    document.getElementById('leader-display').textContent = data.leaderId || 'electing...';
-    document.getElementById('term-display').textContent = data.term || '—';
+    document.getElementById('status-leader').textContent = data.leaderId || 'Unknown';
+    document.getElementById('status-term').textContent = data.term || '0';
   } catch (_) {}
 }
-setInterval(pollLeaderInfo, 2000);
+setInterval(pollLeaderInfo, 1000);
 
 // ==================== REPLICAS STATUS ====================
 let replicasCache = {};
@@ -301,6 +297,7 @@ document.getElementById('clear-logs-btn').addEventListener('click', () => {
 setInterval(() => {
   document.getElementById('status-log').textContent = strokes.length;
   document.getElementById('status-strokes').textContent = strokes.length;
+  document.getElementById('log-display').textContent = strokes.length;
 }, 1000);
 
 document.getElementById('kill-leader-btn').addEventListener('click', async () => {
