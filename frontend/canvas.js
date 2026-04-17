@@ -1,13 +1,20 @@
+// ==================== CANVAS & DRAWING ====================
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 function resizeCanvas() {
   const statusBar = document.getElementById('status-bar');
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight - statusBar.offsetHeight;
+  const canvasSection = document.getElementById('canvas-section');
+  
+  // Get actual canvas container dimensions
+  const rect = canvasSection.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
 }
 resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => {
+  setTimeout(resizeCanvas, 10);  // Slight delay to ensure layout has updated
+});
 
 let isDrawing = false;
 let currentStroke = [];
@@ -15,7 +22,39 @@ let currentColor = '#7c83fd';
 let brushSize = 4;
 let isEraser = false;
 const strokes = []; 
+let undoStack = [];
+let redoStack = [];
 
+// ==================== UNDO / REDO ====================
+function updateUndoRedoButtons() {
+  document.getElementById('undo-btn').disabled = undoStack.length === 0;
+  document.getElementById('redo-btn').disabled = redoStack.length === 0;
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  const removedStroke = strokes.pop();
+  undoStack.pop();
+  redoStack.push(removedStroke);
+  replayAll(strokes);
+  updateUndoRedoButtons();
+  addEventLog('↶ Local Undo', 'success');
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  const redoStroke = redoStack.pop();
+  strokes.push(redoStroke);
+  undoStack.push(redoStroke);
+  replayAll(strokes);
+  updateUndoRedoButtons();
+  addEventLog('↷ Local Redo', 'success');
+}
+
+document.getElementById('undo-btn').addEventListener('click', undo);
+document.getElementById('redo-btn').addEventListener('click', redo);
+
+// ==================== COLOR & BRUSH CONTROLS ====================
 document.querySelectorAll('.color-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
@@ -32,6 +71,7 @@ document.getElementById('brush-size').addEventListener('input', e => {
   brushSize = parseInt(e.target.value);
 });
 
+// ==================== DRAWING FUNCTIONS ====================
 function getPos(e) {
   const rect = canvas.getBoundingClientRect();
   if (e.touches) {
@@ -105,18 +145,41 @@ function sendStroke() {
   }
 }
 
+// ==================== WEBSOCKET & CONNECTION ====================
 let ws = null;
 let reconnectDelay = 1000;
 const maxDelay = 10000;
+const systemEvents = [];
+const MAX_EVENTS = 100;
+
+function addEventLog(message, type = 'info', details = '') {
+  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+  systemEvents.push({ timestamp, message, type, details });
+  if (systemEvents.length > MAX_EVENTS) systemEvents.shift();
+  updateEventLog();
+}
+
+function updateEventLog() {
+  const eventsLog = document.getElementById('events-log');
+  eventsLog.innerHTML = systemEvents.map(evt => `
+    <div class="log-entry">
+      <span class="log-time">${evt.timestamp}</span>
+      <span class="log-event ${evt.type}">${evt.message}</span>
+      ${evt.details ? `<div style="margin-top:2px; color:#7c83fd; font-size:9px;">${evt.details}</div>` : ''}
+    </div>
+  `).join('');
+  eventsLog.scrollTop = eventsLog.scrollHeight;
+}
 
 function connect() {
   updateStatus('reconnecting');
-  const wsUrl = `ws://${window.location.host}`; // Auto-detect host based on serving port, usually 8080
+  const wsUrl = `ws://${window.location.host}`;
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     updateStatus('connected');
     reconnectDelay = 1000;
+    addEventLog('🔗 Connected to Gateway', 'success');
     console.log('[WS] Connected to gateway');
   };
 
@@ -125,20 +188,37 @@ function connect() {
     if (msg.type === 'stroke') {
       strokes.push(msg.stroke);
       renderStroke(msg.stroke);
+      redoStack = [];
+      undoStack.push(msg.stroke);
+      updateUndoRedoButtons();
       document.getElementById('log-display').textContent = strokes.length;
+      document.getElementById('status-strokes').textContent = strokes.length;
     } else if (msg.type === 'replay') {
       strokes.length = 0;
+      undoStack = [];
+      redoStack = [];
       strokes.push(...msg.strokes);
       replayAll(strokes);
+      undoStack = [...msg.strokes];
+      updateUndoRedoButtons();
       document.getElementById('log-display').textContent = strokes.length;
+      document.getElementById('status-strokes').textContent = strokes.length;
+      addEventLog('🔄 Full Log Replay', 'info', `${msg.strokes.length} strokes loaded`);
     } else if (msg.type === 'leader-info') {
       document.getElementById('leader-display').textContent = msg.leaderId || 'unknown';
       document.getElementById('term-display').textContent = msg.term || '—';
+      document.getElementById('status-leader').textContent = msg.leaderId || 'Unknown';
+      document.getElementById('status-term').textContent = msg.term || '0';
+    } else if (msg.type === 'event') {
+      addEventLog(msg.message, msg.severity, msg.details);
+    } else if (msg.type === 'replicas-status') {
+      updateReplicasInfo(msg.replicas);
     }
   };
 
   ws.onclose = () => {
     updateStatus('disconnected');
+    addEventLog('⚠️ Disconnected from Gateway', 'failure', `Retrying in ${reconnectDelay}ms`);
     console.log(`[WS] Disconnected. Reconnecting in ${reconnectDelay}ms`);
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, maxDelay);
@@ -163,8 +243,65 @@ async function pollLeaderInfo() {
     document.getElementById('leader-display').textContent = data.leaderId || 'electing...';
     document.getElementById('term-display').textContent = data.term || '—';
   } catch (_) {}
+  document.getElementById('status-conn').textContent = state === 'connected' ? '✅ Connected' : 
+    state === 'reconnecting' ? '🔄 Reconnecting...' : '❌ Disconnected';
+}
+
+async function pollLeaderInfo() {
+  try {
+    const res = await fetch(`http://${window.location.host}/leader-status`);
+    const data = await res.json();
+    document.getElementById('leader-display').textContent = data.leaderId || 'electing...';
+    document.getElementById('term-display').textContent = data.term || '—';
+  } catch (_) {}
 }
 setInterval(pollLeaderInfo, 2000);
+
+// ==================== REPLICAS STATUS ====================
+let replicasCache = {};
+
+function updateReplicasInfo(replicas) {
+  replicasCache = replicas || {};
+  const replicasDiv = document.getElementById('replicas-info');
+  if (!replicas || Object.keys(replicas).length === 0) {
+    replicasDiv.innerHTML = '<div style="color:#f87171;">No replica info available</div>';
+    return;
+  }
+  replicasDiv.innerHTML = Object.entries(replicas).map(([id, info]) => `
+    <div class="status-item">
+      <div class="status-label">🖥️ ${id}</div>
+      <div style="font-size:10px; margin-top:4px;">
+        <div>Role: <span style="color:#4ade80;">${info.role || 'unknown'}</span></div>
+        <div>Term: <span style="color:#fbbf24;">${info.term || 0}</span></div>
+        <div>Log: <span style="color:#7c83fd;">${info.logLength || 0}</span> entries</div>
+        <div>Commit: <span style="color:#a8b2d8;">${info.commitIndex || -1}</span></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ==================== DASHBOARD TABS ====================
+document.querySelectorAll('.dashboard-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const tabName = tab.dataset.tab;
+    document.querySelectorAll('.dashboard-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.dashboard-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+  });
+});
+
+document.getElementById('clear-logs-btn').addEventListener('click', () => {
+  systemEvents.length = 0;
+  updateEventLog();
+  addEventLog('🗑️ Logs Cleared', 'success');
+});
+
+// ==================== PERIODIC STATUS UPDATES ====================
+setInterval(() => {
+  document.getElementById('status-log').textContent = strokes.length;
+  document.getElementById('status-strokes').textContent = strokes.length;
+}, 1000);
 
 document.getElementById('kill-leader-btn').addEventListener('click', async () => {
   try {
@@ -172,8 +309,11 @@ document.getElementById('kill-leader-btn').addEventListener('click', async () =>
     btn.textContent = 'Killing Leader...';
     btn.style.opacity = '0.5';
     await fetch(`http://${window.location.host}/kill-leader`, { method: 'POST' });
+    addEventLog('💥 Leader Crash Triggered', 'failure');
     setTimeout(() => { btn.textContent = 'Simulate Leader Failure'; btn.style.opacity = '1'; }, 2000);
-  } catch(e) {}
+  } catch(e) {
+    addEventLog('❌ Failed to trigger leader crash', 'failure');
+  }
 });
 
 connect();
