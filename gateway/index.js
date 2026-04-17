@@ -16,16 +16,30 @@ const state = {
   clients: new Set(),         // connected WebSocket clients
   leaderUrl: null,            // current leader's base URL
   replicaUrls: process.env.REPLICA_URLS ? process.env.REPLICA_URLS.split(',') : [],
-  committedLog: []            // in-memory log for reconnecting clients
+  committedLog: [],           // in-memory log for reconnecting clients
+  lastLeaderId: null,         // track leader changes
+  lastTerm: 0,                // track term changes
+  replicasStatus: {}          // track status of all replicas
 };
+
+const log = (msg) => console.log(`[GATEWAY] ${msg}`);
 
 wss.on('connection', (ws) => {
   state.clients.add(ws);
-  console.log(`[GATEWAY] Client connected. Total: ${state.clients.size}`);
+  log(`Client connected. Total: ${state.clients.size}`);
+  broadcast({
+    type: 'event',
+    message: '👤 New Client Connected',
+    severity: 'success',
+    details: `Total clients: ${state.clients.size}`
+  });
 
   if (state.committedLog.length > 0) {
     ws.send(JSON.stringify({ type: 'replay', strokes: state.committedLog }));
   }
+
+  // Send initial replicas status
+  ws.send(JSON.stringify({ type: 'replicas-status', replicas: state.replicasStatus }));
 
   ws.on('message', async (raw) => {
     try {
@@ -38,13 +52,19 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     state.clients.delete(ws);
-    console.log(`[GATEWAY] Client disconnected. Total: ${state.clients.size}`);
+    log(`Client disconnected. Total: ${state.clients.size}`);
+    broadcast({
+      type: 'event',
+      message: '👤 Client Disconnected',
+      severity: 'info',
+      details: `Remaining clients: ${state.clients.size}`
+    });
   });
 });
 
 async function forwardStrokeToLeader(stroke) {
   if (!state.leaderUrl) {
-    console.error('[GATEWAY] No leader known yet, dropping stroke');
+    log('No leader known yet, dropping stroke');
     return;
   }
   try {
@@ -58,13 +78,13 @@ async function forwardStrokeToLeader(stroke) {
         const body = await res.json();
         const newLeaderId = body.redirect;
         if (newLeaderId) {
-            console.log(`[GATEWAY] Leader redirect received: ${newLeaderId}`);
-            // attempt redsicover immediately or let polling do it
+            log(`Leader redirect received: ${newLeaderId}`);
+            // attempt rediscover immediately or let polling do it
             await discoverLeader();
         }
     }
   } catch (e) {
-    console.error('[GATEWAY] Failed to reach leader, triggering rediscovery', e.message);
+    log(`Failed to reach leader, triggering rediscovery: ${e.message}`);
     state.leaderUrl = null;
     await discoverLeader();
   }
@@ -77,7 +97,19 @@ async function discoverLeader() {
       const data = await res.json();
       if (data.role === 'leader') {
         if (state.leaderUrl !== url) {
-          console.log(`[GATEWAY] New leader discovered: ${url} (term ${data.term})`);
+          const newLeaderId = data.id;
+          log(`New leader discovered: ${url} (${newLeaderId}, term ${data.term})`);
+          
+          // Broadcast leader election event
+          broadcast({
+            type: 'event',
+            message: '👑 New Leader Elected',
+            severity: 'success',
+            details: `Leader: ${newLeaderId} at term ${data.term}`
+          });
+          
+          state.lastLeaderId = newLeaderId;
+          state.lastTerm = data.term;
         }
         state.leaderUrl = url;
         return;
@@ -85,7 +117,32 @@ async function discoverLeader() {
     } catch (_) {}
   }
 }
+
+async function pollReplicasStatus() {
+  const newStatus = {};
+  for (const url of state.replicaUrls) {
+    try {
+      const res = await fetch(`${url}/status`, { timeout: 1000 });
+      const data = await res.json();
+      newStatus[data.id] = {
+        role: data.role,
+        term: data.term,
+        logLength: data.logLength,
+        commitIndex: data.commitIndex
+      };
+      
+      // Detect term changes
+      if (state.replicasStatus[data.id]?.term !== data.term) {
+        log(`Term change on ${data.id}: ${state.replicasStatus[data.id]?.term || 0} -> ${data.term}`);
+      }
+    } catch (_) {}
+  }
+  state.replicasStatus = newStatus;
+  broadcast({ type: 'replicas-status', replicas: state.replicasStatus });
+}
+
 setInterval(discoverLeader, 500);
+setInterval(pollReplicasStatus, 1000);
 
 app.post('/committed', (req, res) => {
   const { stroke } = req.body;
@@ -96,8 +153,20 @@ app.post('/committed', (req, res) => {
 
 app.post('/leader-update', (req, res) => {
   const { leaderId, leaderUrl } = req.body;
-  console.log(`[GATEWAY] Leader update received: ${leaderId} at ${leaderUrl}`);
+  log(`Leader update received: ${leaderId} at ${leaderUrl}`);
   state.leaderUrl = leaderUrl;
+  res.json({ success: true });
+});
+
+app.post('/event', (req, res) => {
+  const { message, type, details, source } = req.body;
+  log(`Event from ${source}: ${message}`);
+  broadcast({
+    type: 'event',
+    message: message,
+    severity: type,
+    details: details
+  });
   res.json({ success: true });
 });
 
@@ -107,6 +176,13 @@ app.post('/kill-leader', async (req, res) => {
     fetch(`${state.leaderUrl}/crash`, { method: 'POST' }).catch(() => {});
     const oldLeader = state.leaderUrl;
     state.leaderUrl = null;
+    log(`Crash command sent to ${oldLeader}`);
+    broadcast({
+      type: 'event',
+      message: '💥 Leader Crash Simulated',
+      severity: 'failure',
+      details: `Old leader: ${oldLeader}`
+    });
     res.json({ success: true, message: `Crash command sent to ${oldLeader}` });
   } catch (e) {
     res.status(500).json({ error: 'Failed to send crash command' });
@@ -121,8 +197,8 @@ app.get('/leader-status', (req, res) => {
   const leader = state.replicaUrls.find(u => u === state.leaderUrl);
   res.json({ 
     leaderUrl: state.leaderUrl,
-    leaderId: state.leaderUrl ? state.leaderUrl.split('//')[1].split(':')[0] : null,
-    term: null // Gateway doesn't track term; frontend can get from /status directly
+    leaderId: state.lastLeaderId || (state.leaderUrl ? state.leaderUrl.split('//')[1].split(':')[0] : null),
+    term: state.lastTerm
   });
 });
 
@@ -133,4 +209,4 @@ function broadcast(msg) {
   });
 }
 
-server.listen(8080, () => console.log('[GATEWAY] Listening on :8080'));
+server.listen(8080, () => log('Listening on :8080'));

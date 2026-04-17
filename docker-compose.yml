@@ -1,16 +1,9 @@
-networks:
-  raft-net:
-    driver: bridge
-
 services:
   gateway:
     build: ./gateway
-    ports:
-      - "8080:8080"
-    networks:
-      - raft-net
+    network_mode: host
     environment:
-      - REPLICA_URLS=http://replica1:3001,http://replica2:3002,http://replica3:3003
+      - REPLICA_URLS=http://localhost:3001,http://localhost:3002,http://localhost:3003
     volumes:
       - ./frontend:/app/frontend
     depends_on:
@@ -23,15 +16,12 @@ services:
 
   replica1:
     build: ./replica1
-    ports:
-      - "3001:3001"
-    networks:
-      - raft-net
+    network_mode: host
     environment:
       - REPLICA_ID=replica1
       - REPLICA_PORT=3001
-      - PEER_URLS=http://replica2:3002,http://replica3:3003
-      - GATEWAY_NOTIFY_URL=http://gateway:8080/leader-update
+      - PEER_URLS=http://localhost:3002,http://localhost:3003
+      - GATEWAY_NOTIFY_URL=http://localhost:8080/leader-update
     volumes:
       - ./replica1:/app/src
     healthcheck:
@@ -43,15 +33,12 @@ services:
 
   replica2:
     build: ./replica2
-    ports:
-      - "3002:3002"
-    networks:
-      - raft-net
+    network_mode: host
     environment:
       - REPLICA_ID=replica2
       - REPLICA_PORT=3002
-      - PEER_URLS=http://replica1:3001,http://replica3:3003
-      - GATEWAY_NOTIFY_URL=http://gateway:8080/leader-update
+      - PEER_URLS=http://localhost:3001,http://localhost:3003
+      - GATEWAY_NOTIFY_URL=http://localhost:8080/leader-update
     volumes:
       - ./replica2:/app/src
     healthcheck:
@@ -63,15 +50,12 @@ services:
 
   replica3:
     build: ./replica3
-    ports:
-      - "3003:3003"
-    networks:
-      - raft-net
+    network_mode: host
     environment:
       - REPLICA_ID=replica3
       - REPLICA_PORT=3003
-      - PEER_URLS=http://replica1:3001,http://replica2:3002
-      - GATEWAY_NOTIFY_URL=http://gateway:8080/leader-update
+      - PEER_URLS=http://localhost:3001,http://localhost:3002
+      - GATEWAY_NOTIFY_URL=http://localhost:8080/leader-update
     volumes:
       - ./replica3:/app/src
     healthcheck:

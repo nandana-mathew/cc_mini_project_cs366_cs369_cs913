@@ -20,6 +20,17 @@ let heartbeatInterval;
 
 const log = (msg) => console.log(`[${state.id}][${state.role.toUpperCase()}][T:${state.term}] ${msg}`);
 
+function notifyGatewayEvent(message, type = 'info', details = '') {
+  const gatewayUrl = process.env.GATEWAY_NOTIFY_URL;
+  if (!gatewayUrl) return;
+  const eventUrl = gatewayUrl.replace('/leader-update', '/event');
+  fetch(eventUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, type, details, source: state.id })
+  }).catch(() => {});
+}
+
 function resetElectionTimer() {
   clearTimeout(electionTimer);
   const timeout = 500 + Math.floor(Math.random() * 300);
@@ -31,6 +42,8 @@ async function startElection() {
   state.role = 'candidate';
   state.votedFor = state.id;
   log('Started election');
+  notifyGatewayEvent(`🗳️ ${state.id} Started Election`, 'election', `Term: ${state.term}`);
+  
   let votes = 1;
   const peers = process.env.PEER_URLS ? process.env.PEER_URLS.split(',') : [];
   
@@ -54,6 +67,7 @@ async function startElection() {
   
   if (state.role === 'candidate' && votes >= 2) becomeLeader();
   else if (state.role === 'candidate') {
+    notifyGatewayEvent(`⏳ ${state.id} Election Retry`, 'info', `Term: ${state.term}`);
     setTimeout(startElection, 150 + Math.floor(Math.random() * 150));
   }
 }
@@ -62,6 +76,7 @@ function becomeLeader() {
   state.role = 'leader';
   state.leaderId = state.id;
   log('Became LEADER');
+  notifyGatewayEvent(`👑 ${state.id} Became LEADER`, 'success', `Term: ${state.term}`);
   heartbeatInterval = setInterval(sendHeartbeats, 150);
   notifyGateway();
   sendHeartbeats();
@@ -90,18 +105,33 @@ function notifyGateway() {
 
 app.post('/request-vote', async (req, res) => {
   const { term, candidateId, lastLogIndex, lastLogTerm } = req.body;
-  if (term > state.term) { state.term = term; state.role = 'follower'; state.votedFor = null; clearTimeout(heartbeatInterval); }
+  if (term > state.term) { 
+    state.term = term; 
+    state.role = 'follower'; 
+    state.votedFor = null; 
+    clearTimeout(heartbeatInterval);
+    log(`Received higher term from ${candidateId}: ${term}`);
+  }
   const alreadyVoted = state.votedFor && state.votedFor !== candidateId;
   const candidateLogOk = lastLogIndex >= state.log.length - 1;
   const voteGranted = !alreadyVoted && candidateLogOk && term >= state.term;
-  if (voteGranted) { state.votedFor = candidateId; resetElectionTimer(); }
+  if (voteGranted) { 
+    state.votedFor = candidateId; 
+    resetElectionTimer();
+    log(`Voted for ${candidateId}`);
+  }
   res.json({ voteGranted, term: state.term });
 });
 
 app.post('/append-entries', async (req, res) => {
   const { term, leaderId, prevLogIndex, prevLogTerm, entry, entries, commitIndex } = req.body;
   if (term < state.term) return res.json({ success: false, term: state.term });
-  state.term = term; state.role = 'follower'; state.leaderId = leaderId;
+  if (term > state.term) {
+    state.term = term;
+    log(`Received higher term from ${leaderId}: ${term}`);
+  }
+  state.role = 'follower'; 
+  state.leaderId = leaderId;
   clearTimeout(heartbeatInterval);
   resetElectionTimer();
   
@@ -127,7 +157,9 @@ app.post('/append-entries', async (req, res) => {
 app.post('/heartbeat', (req, res) => {
   const { term, leaderId, commitIndex } = req.body;
   if (term < state.term) return res.json({ success: false });
-  state.term = term; state.role = 'follower'; state.leaderId = leaderId;
+  state.term = term; 
+  state.role = 'follower'; 
+  state.leaderId = leaderId;
   clearTimeout(heartbeatInterval);
   resetElectionTimer();
   if (commitIndex > state.commitIndex) state.commitIndex = commitIndex;
@@ -142,6 +174,7 @@ app.get('/sync-log', (req, res) => {
 
 app.post('/crash', (req, res) => {
   log('CRASH endpoint called. Simulating failure...');
+  notifyGatewayEvent(`💥 ${state.id} Crashed`, 'failure');
   process.exit(1);
 });
 
